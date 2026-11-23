@@ -8,6 +8,7 @@ Stdlib only: the make.fun grader image has no third-party packages.
 
 import os
 import sys
+import tempfile
 
 STORY = "She kept his letters. Burned mine."
 
@@ -31,14 +32,27 @@ def main():
             file=sys.stderr,
         )
         return 1
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in STORY):
+        print("error: story must not contain newline or control characters", file=sys.stderr)
+        return 1
 
     out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, OUTPUT_FILENAME)
     # No trailing newline: the gate counts characters, and the ranking
-    # tie-break favours the smaller text.
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(STORY)
+    # tie-break favours the smaller text. Write atomically so a crash or
+    # interruption can never leave a half-written entry behind.
+    fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=OUTPUT_FILENAME + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(STORY)
+        os.replace(tmp_path, out_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     print(f"wrote {words}-word story ({len(STORY)} chars) to {out_path}")
     return 0
